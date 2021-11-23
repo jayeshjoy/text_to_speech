@@ -1,6 +1,5 @@
 package com.readtext;
 
-import com.readtext.ReadText.GCSEvent;
 import com.google.cloud.functions.BackgroundFunction;
 import com.google.cloud.functions.Context;
 import com.google.cloud.storage.Blob;
@@ -16,24 +15,22 @@ import com.google.cloud.texttospeech.v1.TextToSpeechClient;
 import com.google.cloud.texttospeech.v1.VoiceSelectionParams;
 import com.google.common.collect.ImmutableList;
 import com.google.protobuf.ByteString;
+import com.readtext.ReadText.GCSEvent;
 
 import javax.sound.sampled.AudioInputStream;
-import javax.sound.sampled.AudioSystem;
-import java.io.SequenceInputStream;
-import java.util.Collections;
 import java.util.logging.Logger;
 
 public class ReadText implements BackgroundFunction<GCSEvent> {
   private static final Logger logger = Logger.getLogger(ReadText.class.getName());
   private static final Storage STORAGE = StorageOptions.getDefaultInstance().getService();
   private static final String INPUT_PREFIX = ".speechify_me";
-  private static final String OUTPUT_PREFIX = ".wav";
-  private static final AudioEncoding AUDIO_ENCODING = AudioEncoding.LINEAR16;
+  private static final String OUTPUT_PREFIX = ".mp3";
+  private static final String OUTPUT_CONTENT_TYPE = "audio/mpeg";
+  private static final AudioEncoding AUDIO_ENCODING = AudioEncoding.MP3;
   private static final int CHARACTER_LIMIT = 4999;
   private static final int FIND_BREAK_AFTER = 4000;
   private static final ImmutableList<String> PRIORITIZED_TEXT_STOPS =
           ImmutableList.of("\n\n", "\n", ". ", ".", ",", " ");
-
   private static final SpeechConfig EN_US_CONFIG =
           new SpeechConfig("en-US", "en-US-Wavenet-D", -4.4, 1.2);
   private static final SpeechConfig ES_US_CONFIG =
@@ -55,28 +52,7 @@ public class ReadText implements BackgroundFunction<GCSEvent> {
     logger.info("Read data: " + fileContent);
 
     ImmutableList<ByteString> speechChunks = speechify(fileContent, extractLanguageCodeFromFileName(filename));
-
-    ImmutableList.Builder<AudioInputStream> audioStreamsBuilder = ImmutableList.builder();
-    int totalStreamLength = 0;
-    for (int i = 0; i < speechChunks.size(); i++) {
-      logger.info(String.format("reading chunk: " + i));
-      ByteString speechChunk = speechChunks.get(i);
-      AudioInputStream inputStream = AudioSystem.getAudioInputStream(speechChunk.newInput());
-      audioStreamsBuilder.add(inputStream);
-      totalStreamLength += inputStream.getFrameLength();
-      logger.info(String.format("total stream length is now: " + totalStreamLength));
-    }
-    ImmutableList<AudioInputStream> audioStreams = audioStreamsBuilder.build();
-    SequenceInputStream sequenceInputStream = new SequenceInputStream(Collections.enumeration(audioStreams));
-    AudioInputStream outputStream = new AudioInputStream(
-            sequenceInputStream,
-            audioStreams.get(0).getFormat(),
-            totalStreamLength);
-    String outputFilename = filename.replace(INPUT_PREFIX, OUTPUT_PREFIX);
-    logger.info(String.format("Saving result to %s in bucket %s", outputFilename, bucket));
-    BlobInfo blobInfo = BlobInfo.newBuilder(BlobId.of(bucket, outputFilename)).setContentType("audio/wav").build();
-    STORAGE.create(blobInfo, outputStream.readAllBytes());
-    logger.info("File " + outputFilename + " saved");
+    writeAudioFilesToBucket(speechChunks, bucket, filename);
   }
 
   private SpeechConfig extractLanguageCodeFromFileName(String filename) {
@@ -170,6 +146,19 @@ public class ReadText implements BackgroundFunction<GCSEvent> {
     String findBreakAfterString = System.getenv("FIND_BREAK_AFTER");
     return findBreakAfterString == null || findBreakAfterString.isEmpty() ?
             FIND_BREAK_AFTER : Integer.parseInt(System.getenv("FIND_BREAK_AFTER"));
+  }
+
+  private void writeAudioFilesToBucket(ImmutableList<ByteString> speechChunks, String bucket, String filename) {
+    for (int i = 0; i < speechChunks.size(); i++) {
+      logger.info("reading chunk: " + i);
+      ByteString speechChunk = speechChunks.get(i);
+      String outputFilename = filename.replace(INPUT_PREFIX, "-" + i + OUTPUT_PREFIX);
+      logger.info(String.format("Saving result to %s in bucket %s", outputFilename, bucket));
+      BlobInfo blobInfo =
+              BlobInfo.newBuilder(BlobId.of(bucket, outputFilename)).setContentType(OUTPUT_CONTENT_TYPE).build();
+      STORAGE.create(blobInfo, speechChunk.toByteArray());
+    }
+    logger.info("All audio files saved. Final count = " + speechChunks.size());
   }
 
   public static class SpeechConfig {

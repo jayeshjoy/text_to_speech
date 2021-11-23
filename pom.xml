@@ -13,11 +13,6 @@
       <name>Central Repository</name>
       <url>https://repo1.maven.org/maven2/</url>
     </repository>
-    <repository>
-      <id>clojars</id>
-      <name>Clojars Repository</name>
-      <url>https://repo.clojars.org/</url>
-    </repository>
   </repositories>
 
   <properties>
@@ -38,12 +33,6 @@
   </dependencyManagement>
 
   <dependencies>
-    <!-- https://mvnrepository.com/artifact/clojure-interop/javax.sound -->
-    <dependency>
-      <groupId>clojure-interop</groupId>
-      <artifactId>javax.sound</artifactId>
-      <version>1.0.5</version>
-    </dependency>
     <dependency>
       <groupId>com.google.cloud</groupId>
       <artifactId>google-cloud-texttospeech</artifactId>
